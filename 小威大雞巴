@@ -1,10 +1,15 @@
+-- ====================== 【最終版】小威百發百中（已融合視線瞬間開槍） ======================
+-- 新增功能：當自瞄鎖定到人 + 視線清晰（無擋子彈物件） → 瞬間模擬左鍵開槍
+-- 其他功能全部保留：圓角、縮小只剩標題、可拖拽、G鍵切換自瞄、預設全關、玩家名、框框變綠等
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-print("小威百發百中 已載入！（圓角邊框 + 縮小只剩標題）")
+print("小威百發百中 已載入！（已新增視線清晰瞬間開槍）")
 
 -- ==================== GUI ====================
 local ScreenGui = Instance.new("ScreenGui")
@@ -13,15 +18,14 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = game.CoreGui
 
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 300, 0, 340)
+Frame.Size = UDim2.new(0, 300, 0, 380)  -- 多加一個開關空間
 Frame.Position = UDim2.new(0, 20, 0, 20)
 Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 Frame.BorderSizePixel = 0
 Frame.Parent = ScreenGui
 
--- 加上圓角
 local Corner = Instance.new("UICorner")
-Corner.CornerRadius = UDim.new(0, 12)  -- 圓角大小，可自行調整數字
+Corner.CornerRadius = UDim.new(0, 12)
 Corner.Parent = Frame
 
 -- 標題列
@@ -62,11 +66,10 @@ ContentFrame.Visible = true
 ContentFrame.Parent = Frame
 
 local isMinimized = false
-local originalSize = UDim2.new(0, 300, 0, 340)
+local originalSize = UDim2.new(0, 300, 0, 380)
 
 MinimizeBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
-    
     if isMinimized then
         Frame.Size = UDim2.new(0, 300, 0, 45)
         ContentFrame.Visible = false
@@ -109,9 +112,13 @@ local NAME_ENABLED = false
 local BOX_ENABLED = false
 local TRACER_ENABLED = false
 local AIMBOT_ENABLED = false
+local INSTANT_SHOOT_ENABLED = false   -- ← 新增：視線清晰瞬間開槍
 
 local BOX_COLOR_NORMAL = Color3.fromRGB(255, 60, 60)
 local BOX_COLOR_AIMING = Color3.fromRGB(60, 255, 60)
+
+local lastShootTime = 0
+local SHOOT_COOLDOWN = 0.12   -- 避免連點太密集
 
 -- ==================== Toggle 按鈕 ====================
 local function CreateToggle(name, yOffset, defaultEnabled)
@@ -125,7 +132,6 @@ local function CreateToggle(name, yOffset, defaultEnabled)
     Toggle.Font = Enum.Font.GothamSemibold
     Toggle.Parent = ContentFrame
 
-    -- 給 Toggle 也加上圓角
     local tCorner = Instance.new("UICorner")
     tCorner.CornerRadius = UDim.new(0, 8)
     tCorner.Parent = Toggle
@@ -139,7 +145,8 @@ local function CreateToggle(name, yOffset, defaultEnabled)
         elseif name == "玩家名" then NAME_ENABLED = enabled
         elseif name == "玩家框框" then BOX_ENABLED = enabled
         elseif name == "玩家射線" then TRACER_ENABLED = enabled
-        elseif name == "自瞄" then AIMBOT_ENABLED = enabled end
+        elseif name == "自瞄" then AIMBOT_ENABLED = enabled
+        elseif name == "視線開槍" then INSTANT_SHOOT_ENABLED = enabled end   -- ← 新增
 
         Toggle.BackgroundColor3 = enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(80, 80, 80)
     end)
@@ -150,18 +157,20 @@ CreateToggle("玩家名", 60, false)
 CreateToggle("玩家框框", 110, false)
 CreateToggle("玩家射線", 160, false)
 CreateToggle("自瞄", 210, false)
+CreateToggle("視線開槍", 260, false)   -- ← 新增開關
 
 local Hint = Instance.new("TextLabel")
 Hint.Size = UDim2.new(0.9, 0, 0, 30)
-Hint.Position = UDim2.new(0.05, 0, 0, 260)
+Hint.Position = UDim2.new(0.05, 0, 0, 310)
 Hint.BackgroundTransparency = 1
-Hint.Text = "按 G 鍵 快速開關自瞄"
+Hint.Text = "按 G 鍵快速開關自瞄\n視線清晰時自動瞬間左鍵開槍"
 Hint.TextColor3 = Color3.fromRGB(200, 200, 200)
-Hint.TextSize = 15
+Hint.TextSize = 14
 Hint.Font = Enum.Font.Gotham
+Hint.TextWrapped = true
 Hint.Parent = ContentFrame
 
--- ==================== ESP 系統 ====================
+-- ==================== ESP 相關 ====================
 local ESPFolder = Instance.new("Folder")
 ESPFolder.Name = "XiaoWeiESP"
 ESPFolder.Parent = game.CoreGui
@@ -173,6 +182,7 @@ local Boxes = {}
 local AIM_PART = "Head"
 local AIM_SMOOTHNESS = 0.25
 
+-- ==================== 建立 ESP 物件 ====================
 local function CreateNameESP(player)
     if player == LocalPlayer then return end
     local billboard = Instance.new("BillboardGui")
@@ -226,9 +236,32 @@ local function CreateTracer(player)
     Tracers[player] = line
 end
 
+-- ==================== 視線檢查（偵測是否被物件擋住子彈） ====================
+local function IsLineOfSightClear(targetPart)
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot or not targetPart then return false end
+
+    local direction = (targetPart.Position - myRoot.Position)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.IgnoreWater = true
+
+    local result = workspace:Raycast(myRoot.Position, direction, rayParams)
+    if result then
+        -- 如果打到的不是目標本身，就代表有障礙物擋住
+        if not result.Instance:IsDescendantOf(targetPart.Parent) then
+            return false
+        end
+    end
+    return true
+end
+
+-- ==================== 找最近目標 ====================
 local function GetClosestTarget()
     local closest = nil
     local minDist = math.huge
+
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
             local humanoid = player.Character:FindFirstChild("Humanoid")
@@ -236,9 +269,11 @@ local function GetClosestTarget()
             if humanoid and targetPart and humanoid.Health > 10 then
                 local origin = Camera.CFrame.Position
                 local direction = targetPart.Position - origin
+
                 local params = RaycastParams.new()
                 params.FilterDescendantsInstances = {LocalPlayer.Character or Instance.new("Folder")}
                 params.FilterType = Enum.RaycastFilterType.Exclude
+
                 local result = workspace:Raycast(origin, direction, params)
                 if result == nil or (result.Instance and result.Instance:IsDescendantOf(player.Character)) then
                     local dist = direction.Magnitude
@@ -253,16 +288,30 @@ local function GetClosestTarget()
     return closest
 end
 
+-- ==================== 自瞄 + 視線瞬間開槍 ====================
 RunService.RenderStepped:Connect(function()
-    if not AIMBOT_ENABLED then return end
-    local target = GetClosestTarget()
-    if target then
-        local targetCFrame = CFrame.lookAt(Camera.CFrame.Position, target.Position)
-        Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, AIM_SMOOTHNESS)
-    end
-end)
+    -- 自瞄本體
+    if AIMBOT_ENABLED then
+        local target = GetClosestTarget()
+        if target then
+            local targetCFrame = CFrame.lookAt(Camera.CFrame.Position, target.Position)
+            Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, AIM_SMOOTHNESS)
 
-RunService.RenderStepped:Connect(function()
+            -- 新增：視線清晰 + 開槍開關啟用 → 瞬間左鍵開槍
+            if INSTANT_SHOOT_ENABLED and tick() - lastShootTime > SHOOT_COOLDOWN then
+                if IsLineOfSightClear(target) then
+                    -- 模擬左鍵按下 → 放開
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)   -- 按下
+                    task.wait(0.025)
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)  -- 放開
+
+                    lastShootTime = tick()
+                end
+            end
+        end
+    end
+
+    -- 框框顏色跟隨自瞄狀態
     for player, box in pairs(Boxes) do
         if box then
             box.Color3 = AIMBOT_ENABLED and BOX_COLOR_AIMING or BOX_COLOR_NORMAL
@@ -270,6 +319,7 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
+    -- Name ESP
     for player, data in pairs(NameLabels) do
         if ESP_ENABLED and NAME_ENABLED and player.Character and player.Character:FindFirstChild("Head") and player.Character:FindFirstChild("Humanoid") then
             local head = player.Character.Head
@@ -282,6 +332,7 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
+    -- Tracer
     for player, line in pairs(Tracers) do
         if ESP_ENABLED and TRACER_ENABLED and player.Character and player.Character:FindFirstChild("Head") then
             local headPos = player.Character.Head.Position
@@ -299,7 +350,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- 初始化
+-- ==================== 初始化 ====================
 for _, plr in pairs(Players:GetPlayers()) do
     CreateNameESP(plr)
     CreateBoxESP(plr)
