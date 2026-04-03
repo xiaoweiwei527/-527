@@ -4,7 +4,7 @@ local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-print("小威百發百中 已載入！（已新增玩家名 + 低血量跳過）")
+print("小威百發百中 已載入！（新增拖拽 + 縮小 + 自瞄時框框變綠）")
 
 -- ==================== GUI 介面 ====================
 local ScreenGui = Instance.new("ScreenGui")
@@ -13,14 +13,15 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = game.CoreGui
 
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 300, 0, 320)
+Frame.Size = UDim2.new(0, 300, 0, 340)
 Frame.Position = UDim2.new(0, 20, 0, 20)
 Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 Frame.BorderSizePixel = 0
 Frame.Parent = ScreenGui
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 45)
+Title.Size = UDim2.new(1, -50, 0, 45)
+Title.Position = UDim2.new(0, 0, 0, 0)
 Title.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
 Title.Text = "小威百發百中"
 Title.TextColor3 = Color3.new(1, 1, 1)
@@ -28,11 +29,67 @@ Title.TextScaled = true
 Title.Font = Enum.Font.GothamBold
 Title.Parent = Frame
 
+-- 縮小按鈕
+local MinimizeBtn = Instance.new("TextButton")
+MinimizeBtn.Size = UDim2.new(0, 45, 0, 45)
+MinimizeBtn.Position = UDim2.new(1, -45, 0, 0)
+MinimizeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+MinimizeBtn.Text = "−"
+MinimizeBtn.TextColor3 = Color3.new(1,1,1)
+MinimizeBtn.TextScaled = true
+MinimizeBtn.Font = Enum.Font.GothamBold
+MinimizeBtn.Parent = Frame
+
+local isMinimized = false
+local originalSize = Frame.Size
+
+MinimizeBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        Frame.Size = UDim2.new(0, 300, 0, 45)
+        MinimizeBtn.Text = "+"
+    else
+        Frame.Size = originalSize
+        MinimizeBtn.Text = "−"
+    end
+end)
+
+-- ==================== 拖拽功能（點 Title 拖動） ====================
+local dragging = false
+local dragInput
+local dragStart
+local startPos
+
+Title.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = Frame.Position
+    end
+end)
+
+Title.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- ==================== 功能變數 ====================
 local ESP_ENABLED = true     
-local NAME_ENABLED = true    -- 新增：玩家名開關
+local NAME_ENABLED = true    
 local BOX_ENABLED = true
 local TRACER_ENABLED = true
 local AIMBOT_ENABLED = false
+
+local BOX_COLOR_NORMAL = Color3.fromRGB(255, 60, 60)   -- 紅色（自瞄關閉）
+local BOX_COLOR_AIMING = Color3.fromRGB(60, 255, 60)   -- 綠色（自瞄開啟）
 
 local function CreateToggle(name, yOffset, defaultEnabled)
     local Toggle = Instance.new("TextButton")
@@ -63,14 +120,14 @@ local function CreateToggle(name, yOffset, defaultEnabled)
 end
 
 CreateToggle("玩家ESP", 55, true)
-CreateToggle("玩家名", 105, true)   -- 新增玩家名開關
+CreateToggle("玩家名", 105, true)
 CreateToggle("玩家框框", 155, true)
 CreateToggle("玩家射線", 205, true)
 CreateToggle("自瞄", 255, false)
 
 local Hint = Instance.new("TextLabel")
 Hint.Size = UDim2.new(0.9, 0, 0, 30)
-Hint.Position = UDim2.new(0.05, 0, 0, 290)
+Hint.Position = UDim2.new(0.05, 0, 0, 300)
 Hint.BackgroundTransparency = 1
 Hint.Text = "按 G 鍵 快速開關自瞄"
 Hint.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -85,6 +142,7 @@ ESPFolder.Parent = game.CoreGui
 
 local NameLabels = {}
 local Tracers = {}
+local Boxes = {}  -- 用來儲存每個玩家的 Box 物件
 
 local AIM_PART = "Head"
 local AIM_SMOOTHNESS = 0.25
@@ -92,7 +150,6 @@ local AIM_SMOOTHNESS = 0.25
 -- ==================== 玩家名 (Name ESP) ====================
 local function CreateNameESP(player)
     if player == LocalPlayer then return end
-
     local billboard = Instance.new("BillboardGui")
     billboard.Adornee = nil
     billboard.Size = UDim2.new(0, 200, 0, 50)
@@ -112,16 +169,18 @@ local function CreateNameESP(player)
     NameLabels[player] = {Billboard = billboard, Text = text}
 end
 
--- ==================== 玩家框框 ====================
+-- ==================== 玩家框框（支援顏色切換） ====================
 local function CreateBoxESP(player)
     if player == LocalPlayer then return end
     local box = Instance.new("BoxHandleAdornment")
     box.AlwaysOnTop = true
     box.ZIndex = 10
     box.Size = Vector3.new(4, 6, 2)
-    box.Color3 = Color3.fromRGB(255, 60, 60)
+    box.Color3 = BOX_COLOR_NORMAL
     box.Transparency = 0.35
     box.Parent = ESPFolder
+
+    Boxes[player] = box
 
     local function Update()
         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -147,7 +206,7 @@ local function CreateTracer(player)
     Tracers[player] = line
 end
 
--- ==================== 自瞄（新增血量 > 10% 檢查） ====================
+-- ==================== 自瞄（血量 > 10%） ====================
 local function GetClosestTarget()
     local closest = nil
     local minDist = math.huge
@@ -157,7 +216,7 @@ local function GetClosestTarget()
             local humanoid = player.Character:FindFirstChild("Humanoid")
             local targetPart = player.Character:FindFirstChild(AIM_PART)
 
-            if humanoid and targetPart and humanoid.Health > 10 then  -- 只鎖定血量 > 10%
+            if humanoid and targetPart and humanoid.Health > 10 then
                 local origin = Camera.CFrame.Position
                 local direction = targetPart.Position - origin
 
@@ -189,8 +248,15 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- ==================== 更新 Name ESP + 射線 ====================
+-- ==================== 更新 Name ESP + 射線 + 動態框框顏色 ====================
 RunService.RenderStepped:Connect(function()
+    -- 更新框框顏色（根據自瞄狀態）
+    for player, box in pairs(Boxes) do
+        if box then
+            box.Color3 = AIMBOT_ENABLED and BOX_COLOR_AIMING or BOX_COLOR_NORMAL
+        end
+    end
+
     for player, data in pairs(NameLabels) do
         local visible = ESP_ENABLED and NAME_ENABLED
         if visible and player.Character and player.Character:FindFirstChild("Head") and player.Character:FindFirstChild("Humanoid") then
@@ -241,7 +307,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode == Enum.KeyCode.G then
         AIMBOT_ENABLED = not AIMBOT_ENABLED
-        print(AIMBOT_ENABLED and "自瞄 已開啟" or "自瞄 已關閉")
+        print(AIMBOT_ENABLED and "自瞄 已開啟（框框變綠）" or "自瞄 已關閉（框框變紅）")
     end
 end)
 
