@@ -4,7 +4,7 @@ local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-print("小威百發百中 已載入！（已修正縮小 + 預設全關）")
+print("小威百發百中 已載入！（圓角邊框 + 縮小只剩標題）")
 
 -- ==================== GUI ====================
 local ScreenGui = Instance.new("ScreenGui")
@@ -19,6 +19,12 @@ Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 Frame.BorderSizePixel = 0
 Frame.Parent = ScreenGui
 
+-- 加上圓角
+local Corner = Instance.new("UICorner")
+Corner.CornerRadius = UDim.new(0, 12)  -- 圓角大小，可自行調整數字
+Corner.Parent = Frame
+
+-- 標題列
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -50, 0, 45)
 Title.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
@@ -28,7 +34,11 @@ Title.TextScaled = true
 Title.Font = Enum.Font.GothamBold
 Title.Parent = Frame
 
--- 縮小按鈕
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 12)
+TitleCorner.Parent = Title
+
+-- 縮小/放大按鈕
 local MinimizeBtn = Instance.new("TextButton")
 MinimizeBtn.Size = UDim2.new(0, 45, 0, 45)
 MinimizeBtn.Position = UDim2.new(1, -45, 0, 0)
@@ -39,24 +49,31 @@ MinimizeBtn.TextScaled = true
 MinimizeBtn.Font = Enum.Font.GothamBold
 MinimizeBtn.Parent = Frame
 
--- 內容容器（用來統一控制顯示/隱藏）
+local BtnCorner = Instance.new("UICorner")
+BtnCorner.CornerRadius = UDim.new(0, 12)
+BtnCorner.Parent = MinimizeBtn
+
+-- 內容容器
 local ContentFrame = Instance.new("Frame")
 ContentFrame.Size = UDim2.new(1, 0, 1, -45)
 ContentFrame.Position = UDim2.new(0, 0, 0, 45)
 ContentFrame.BackgroundTransparency = 1
+ContentFrame.Visible = true
 ContentFrame.Parent = Frame
 
 local isMinimized = false
-local originalSize = Frame.Size
+local originalSize = UDim2.new(0, 300, 0, 340)
 
 MinimizeBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
-    ContentFrame.Visible = not isMinimized
+    
     if isMinimized then
         Frame.Size = UDim2.new(0, 300, 0, 45)
+        ContentFrame.Visible = false
         MinimizeBtn.Text = "+"
     else
         Frame.Size = originalSize
+        ContentFrame.Visible = true
         MinimizeBtn.Text = "−"
     end
 end)
@@ -93,12 +110,10 @@ local BOX_ENABLED = false
 local TRACER_ENABLED = false
 local AIMBOT_ENABLED = false
 
-local BOX_COLOR_NORMAL = Color3.fromRGB(255, 60, 60)   -- 紅色
-local BOX_COLOR_AIMING = Color3.fromRGB(60, 255, 60)   -- 綠色
+local BOX_COLOR_NORMAL = Color3.fromRGB(255, 60, 60)
+local BOX_COLOR_AIMING = Color3.fromRGB(60, 255, 60)
 
 -- ==================== Toggle 按鈕 ====================
-local toggles = {}
-
 local function CreateToggle(name, yOffset, defaultEnabled)
     local Toggle = Instance.new("TextButton")
     Toggle.Size = UDim2.new(0.9, 0, 0, 40)
@@ -109,6 +124,11 @@ local function CreateToggle(name, yOffset, defaultEnabled)
     Toggle.TextSize = 18
     Toggle.Font = Enum.Font.GothamSemibold
     Toggle.Parent = ContentFrame
+
+    -- 給 Toggle 也加上圓角
+    local tCorner = Instance.new("UICorner")
+    tCorner.CornerRadius = UDim.new(0, 8)
+    tCorner.Parent = Toggle
 
     local enabled = defaultEnabled
 
@@ -123,9 +143,6 @@ local function CreateToggle(name, yOffset, defaultEnabled)
 
         Toggle.BackgroundColor3 = enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(80, 80, 80)
     end)
-
-    toggles[name] = Toggle
-    return Toggle
 end
 
 CreateToggle("玩家ESP", 10, false)
@@ -144,7 +161,7 @@ Hint.TextSize = 15
 Hint.Font = Enum.Font.Gotham
 Hint.Parent = ContentFrame
 
--- ==================== ESP 相關（其餘程式碼保持不變） ====================
+-- ==================== ESP 系統 ====================
 local ESPFolder = Instance.new("Folder")
 ESPFolder.Name = "XiaoWeiESP"
 ESPFolder.Parent = game.CoreGui
@@ -195,6 +212,7 @@ local function CreateBoxESP(player)
             box.Visible = false
         end
     end
+    if player.Character then Update() end
     player.CharacterAdded:Connect(function() task.wait(0.5); Update() end)
     RunService.Heartbeat:Connect(Update)
 end
@@ -294,7 +312,7 @@ Players.PlayerAdded:Connect(function(plr)
     CreateTracer(plr)
 end)
 
--- G 鍵
+-- G 鍵快速切換自瞄
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode == Enum.KeyCode.G then
