@@ -4,7 +4,7 @@ local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
-print("✅ 小威百發百中 已載入！")
+print("小威百發百中 已載入！（已新增玩家名 + 低血量跳過）")
 
 -- ==================== GUI 介面 ====================
 local ScreenGui = Instance.new("ScreenGui")
@@ -13,7 +13,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = game.CoreGui
 
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 300, 0, 280)
+Frame.Size = UDim2.new(0, 300, 0, 320)
 Frame.Position = UDim2.new(0, 20, 0, 20)
 Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 Frame.BorderSizePixel = 0
@@ -29,11 +29,10 @@ Title.Font = Enum.Font.GothamBold
 Title.Parent = Frame
 
 local ESP_ENABLED = true     
+local NAME_ENABLED = true    -- 新增：玩家名開關
 local BOX_ENABLED = true
 local TRACER_ENABLED = true
 local AIMBOT_ENABLED = false
-
-local ESPToggle, BoxToggle, TracerToggle, AimToggle
 
 local function CreateToggle(name, yOffset, defaultEnabled)
     local Toggle = Instance.new("TextButton")
@@ -51,15 +50,11 @@ local function CreateToggle(name, yOffset, defaultEnabled)
     Toggle.MouseButton1Click:Connect(function()
         enabled = not enabled
 
-        if name == "玩家ESP" then
-            ESP_ENABLED = enabled
-        elseif name == "玩家框框" then
-            BOX_ENABLED = enabled
-        elseif name == "玩家射線" then
-            TRACER_ENABLED = enabled
-        elseif name == "自瞄" then
-            AIMBOT_ENABLED = enabled
-        end
+        if name == "玩家ESP" then ESP_ENABLED = enabled
+        elseif name == "玩家名" then NAME_ENABLED = enabled
+        elseif name == "玩家框框" then BOX_ENABLED = enabled
+        elseif name == "玩家射線" then TRACER_ENABLED = enabled
+        elseif name == "自瞄" then AIMBOT_ENABLED = enabled end
 
         Toggle.BackgroundColor3 = enabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(80, 80, 80)
     end)
@@ -67,14 +62,15 @@ local function CreateToggle(name, yOffset, defaultEnabled)
     return Toggle
 end
 
-ESPToggle   = CreateToggle("玩家ESP", 55, true)      
-BoxToggle   = CreateToggle("玩家框框", 105, true)
-TracerToggle = CreateToggle("玩家射線", 155, true)
-AimToggle   = CreateToggle("自瞄", 205, false)
+CreateToggle("玩家ESP", 55, true)
+CreateToggle("玩家名", 105, true)   -- 新增玩家名開關
+CreateToggle("玩家框框", 155, true)
+CreateToggle("玩家射線", 205, true)
+CreateToggle("自瞄", 255, false)
 
 local Hint = Instance.new("TextLabel")
 Hint.Size = UDim2.new(0.9, 0, 0, 30)
-Hint.Position = UDim2.new(0.05, 0, 0, 250)
+Hint.Position = UDim2.new(0.05, 0, 0, 290)
 Hint.BackgroundTransparency = 1
 Hint.Text = "按 G 鍵 快速開關自瞄"
 Hint.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -87,15 +83,38 @@ local ESPFolder = Instance.new("Folder")
 ESPFolder.Name = "XiaoWeiESP"
 ESPFolder.Parent = game.CoreGui
 
+local NameLabels = {}
 local Tracers = {}
 
 local AIM_PART = "Head"
 local AIM_SMOOTHNESS = 0.25
 
+-- ==================== 玩家名 (Name ESP) ====================
+local function CreateNameESP(player)
+    if player == LocalPlayer then return end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Adornee = nil
+    billboard.Size = UDim2.new(0, 200, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = ESPFolder
+
+    local text = Instance.new("TextLabel")
+    text.Size = UDim2.new(1, 0, 1, 0)
+    text.BackgroundTransparency = 1
+    text.TextColor3 = Color3.fromRGB(255, 80, 80)
+    text.TextStrokeTransparency = 0.5
+    text.TextScaled = true
+    text.Font = Enum.Font.GothamBold
+    text.Parent = billboard
+
+    NameLabels[player] = {Billboard = billboard, Text = text}
+end
+
 -- ==================== 玩家框框 ====================
 local function CreateBoxESP(player)
     if player == LocalPlayer then return end
-
     local box = Instance.new("BoxHandleAdornment")
     box.AlwaysOnTop = true
     box.ZIndex = 10
@@ -105,10 +124,9 @@ local function CreateBoxESP(player)
     box.Parent = ESPFolder
 
     local function Update()
-        local visible = ESP_ENABLED and BOX_ENABLED
         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
             box.Adornee = player.Character.HumanoidRootPart
-            box.Visible = visible
+            box.Visible = ESP_ENABLED and BOX_ENABLED
         else
             box.Visible = false
         end
@@ -129,28 +147,32 @@ local function CreateTracer(player)
     Tracers[player] = line
 end
 
--- ==================== 自瞄 ====================
+-- ==================== 自瞄（新增血量 > 10% 檢查） ====================
 local function GetClosestTarget()
     local closest = nil
     local minDist = math.huge
 
     for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(AIM_PART) then
-            local targetPart = player.Character[AIM_PART]
-            local origin = Camera.CFrame.Position
-            local direction = targetPart.Position - origin
+        if player ~= LocalPlayer and player.Character then
+            local humanoid = player.Character:FindFirstChild("Humanoid")
+            local targetPart = player.Character:FindFirstChild(AIM_PART)
 
-            local params = RaycastParams.new()
-            params.FilterDescendantsInstances = {LocalPlayer.Character or Instance.new("Folder")}
-            params.FilterType = Enum.RaycastFilterType.Exclude
+            if humanoid and targetPart and humanoid.Health > 10 then  -- 只鎖定血量 > 10%
+                local origin = Camera.CFrame.Position
+                local direction = targetPart.Position - origin
 
-            local result = workspace:Raycast(origin, direction, params)
+                local params = RaycastParams.new()
+                params.FilterDescendantsInstances = {LocalPlayer.Character or Instance.new("Folder")}
+                params.FilterType = Enum.RaycastFilterType.Exclude
 
-            if result == nil or (result.Instance and result.Instance:IsDescendantOf(player.Character)) then
-                local dist = direction.Magnitude
-                if dist < minDist then
-                    minDist = dist
-                    closest = targetPart
+                local result = workspace:Raycast(origin, direction, params)
+
+                if result == nil or (result.Instance and result.Instance:IsDescendantOf(player.Character)) then
+                    local dist = direction.Magnitude
+                    if dist < minDist then
+                        minDist = dist
+                        closest = targetPart
+                    end
                 end
             end
         end
@@ -160,7 +182,6 @@ end
 
 RunService.RenderStepped:Connect(function()
     if not AIMBOT_ENABLED then return end
-
     local target = GetClosestTarget()
     if target then
         local targetCFrame = CFrame.lookAt(Camera.CFrame.Position, target.Position)
@@ -168,14 +189,27 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- ==================== 更新射線 ====================
+-- ==================== 更新 Name ESP + 射線 ====================
 RunService.RenderStepped:Connect(function()
+    for player, data in pairs(NameLabels) do
+        local visible = ESP_ENABLED and NAME_ENABLED
+        if visible and player.Character and player.Character:FindFirstChild("Head") and player.Character:FindFirstChild("Humanoid") then
+            local head = player.Character.Head
+            local humanoid = player.Character.Humanoid
+            data.Billboard.Adornee = head
+            data.Text.Text = player.Name .. " [" .. math.floor(humanoid.Health) .. "%]"
+            data.Billboard.Enabled = true
+        else
+            if data.Billboard then data.Billboard.Enabled = false end
+        end
+    end
+
+    -- 射線更新
     for player, line in pairs(Tracers) do
         local visible = ESP_ENABLED and TRACER_ENABLED
         if visible and player.Character and player.Character:FindFirstChild("Head") then
             local headPos = player.Character.Head.Position
             local screenPos, onScreen = Camera:WorldToViewportPoint(headPos)
-
             if onScreen then
                 line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
                 line.To = Vector2.new(screenPos.X, screenPos.Y)
@@ -191,28 +225,24 @@ end)
 
 -- ==================== 初始化 ====================
 for _, plr in pairs(Players:GetPlayers()) do
+    CreateNameESP(plr)
     CreateBoxESP(plr)
     CreateTracer(plr)
 end
 
 Players.PlayerAdded:Connect(function(plr)
+    CreateNameESP(plr)
     CreateBoxESP(plr)
     CreateTracer(plr)
 end)
 
--- ==================== G 鍵快速切換自瞄 + 顏色變更 ====================
+-- ==================== G 鍵快速切換自瞄 ====================
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode == Enum.KeyCode.G then
         AIMBOT_ENABLED = not AIMBOT_ENABLED
-        
-        if AimToggle then
-            AimToggle.BackgroundColor3 = AIMBOT_ENABLED and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(80, 80, 80)
-        end
-
-        print(AIMBOT_ENABLED and "🔫 自瞄 已開啟（綠色）" or "🔫 自瞄 已關閉")
+        print(AIMBOT_ENABLED and "自瞄 已開啟" or "自瞄 已關閉")
     end
 end)
-
 
 
